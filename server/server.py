@@ -7,7 +7,7 @@ class server(object):
         self.serSocket.bind((address,port))
         self.serSocket.listen(10)
         self.buf_size = 1
-        self.function = self.start_signal()
+        self.function = self.start_signal
         print('server on')        
     
     def wait_for_connect(self):
@@ -25,8 +25,9 @@ class server(object):
     
     def recv_byte(self):
         print('wait 1 byte...')
-        self.connect.settimeout(3)
+        self.connect.settimeout(90)
         buf = self.connect.recv(1)
+        print('[client]:'+str(buf))
         return buf
     
     def send(self, buf):
@@ -45,46 +46,40 @@ class server(object):
         
     def set_function_and_size(self, function_code=0, buf_size_code=0):
         function_list=[self.re_start,self.receive_long_data]
-        try:
-            self.function = function_list[function_code]
-            
-        except IndexError:
-            return 0
+
+        self.function = function_list[function_code]
         self.buf_size = 2**buf_size_code
         self.ack()
-        return 1
 
     def ack(self):
-        self.send(self, b'\xff')
+        self.send(b'\xff')
 
     def re_start(self):
         self.close()
         self.start_signal()
 
     def start_signal(self):
-        while True:
-            self.wait_for_connect()
-            try:
-                received_buf = self.recv(5,1)
-                received_buf = self.buf_to_int(buf=received_buf)
-            except (TimeoutError, ValueError):
-                self.close()
-                continue
-            
-            function_code = received_buf>>4
-            buf_size_code = received_buf & 0b00001111
-            if self.set_function_and_size(function_code, buf_size_code):
-                return 1
-            else:
-                return 0
+        
+        self.wait_for_connect()
+        received_buf = self.recv_byte()
+        received_buf = self.buf_to_int(buf=received_buf)
+        
+        function_code = received_buf>>4
+        buf_size_code = received_buf & 0b00001111
+        try:
+            self.set_function_and_size(function_code, buf_size_code)
+        except IndexError:
+            print('unexpected function')
+                
 
     def router(self):
-        ret = self.function()
-        if ret:
-            return ret
-        else:
+        try:
+            print('<function>'+str(self.function.__name__))
+            ret = self.function()
+        except (ConnectionError, ValueError) as err:
+            print('!!Error:' + str(err))
             self.close()
-            self.start_signal(self)
+            self.function = self.start_signal
 
     def receive_long_data(self):
         working = 1
@@ -94,7 +89,6 @@ class server(object):
 
         while working:
             self.send(ack)
-            
             received_bytes = bytearray(self.recv(2))
             #working = received_bytes[-1] & 0b00000001
             if received_bytes[-1] & 0b00000001:
@@ -145,7 +139,11 @@ class server(object):
                 last_byte = 0 + (len(buf-1)<<1)
                 self.send(buf + bytes(last_byte))
                 break
-            
+
+if __name__ == '__main__':
+    a=server(socket.gethostname(), 8266)
+    while True:
+        a.router()
 
 
             
