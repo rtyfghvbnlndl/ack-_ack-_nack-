@@ -7,6 +7,7 @@ class server(object):
         self.serSocket.bind((address,port))
         self.serSocket.listen(10)
         self.buf_size = 1
+        self.function_list=[self.re_start, self.receive_long_data,]
         self.function = self.start_signal
         print('server on')        
     
@@ -21,6 +22,8 @@ class server(object):
         self.connect.settimeout(timeout)
         buf = self.connect.recv(self.buf_size)
         print('[client]:'+str(buf))
+        if buf == b'':
+            raise ConnectionError("receive a b''")
         return buf
     
     def recv_byte(self):
@@ -28,6 +31,8 @@ class server(object):
         self.connect.settimeout(90)
         buf = self.connect.recv(1)
         print('[client]:'+str(buf))
+        if buf == b'':
+            raise ConnectionError("receive a b''")
         return buf
     
     def send(self, buf):
@@ -38,16 +43,14 @@ class server(object):
         self.connect.close()
 
     def buf_to_int(self,buf=bytes()):
-        if len(buf) == self.buf_size:
+        if len(buf) == self.buf_size or len(buf) == 1:
             int_buf = int.from_bytes(buf, byteorder='big', signed=False)
             return int_buf
         else:
             raise ValueError('length do not match')
         
     def set_function_and_size(self, function_code=0, buf_size_code=0):
-        function_list=[self.re_start,self.receive_long_data]
-
-        self.function = function_list[function_code]
+        self.function = self.function_list[function_code]
         self.buf_size = 2**buf_size_code
         self.ack()
 
@@ -59,8 +62,7 @@ class server(object):
         self.start_signal()
 
     def start_signal(self):
-        
-        self.wait_for_connect()
+        #self.wait_for_connect()
         received_buf = self.recv_byte()
         received_buf = self.buf_to_int(buf=received_buf)
         
@@ -76,72 +78,100 @@ class server(object):
         try:
             print('<function>'+str(self.function.__name__))
             ret = self.function()
-        except (ConnectionError, ValueError) as err:
+        except (ValueError, TimeoutError) as err:
             print('!!Error:' + str(err))
             self.close()
             self.function = self.start_signal
+        except ConnectionError:
+            self.wait_for_connect()
 
     def receive_long_data(self):
-        working = 1
-        server_page = 0
-        data_list=[]
-        ack = b'\xff'
+        working, page, data_list, ack = 1, 0, [], b'\xff'
 
         while working:
             self.send(ack)
-            received_bytes = bytearray(self.recv(2))
-            #working = received_bytes[-1] & 0b00000001
-            if received_bytes[-1] & 0b00000001:
-                #未到尾页
-                cline_page = received_bytes[-1] >> 1   
+            received_bytes = self.recv(2)
+            last_byte_int = received_bytes[-1]
             
-                if server_page==cline_page:
+            if last_byte_int & 0b00000001:
+                #未到尾页
+                cline_page = last_byte_int >> 1   
+                if page==cline_page:
                     try:
-                        data_list[server_page]=received_bytes[0:-1]
+                        data_list[page]=received_bytes[0:-1]
                     except IndexError:
                         data_list.append(received_bytes[0:-1])
-                    server_page+=1
+                    page+=1
+                    #确认信号
                     ack = b'\xff'
                 else: 
-                    ack = server_page<<1
+                    #同步指令
+                    ack = (page<<1).to_bytes(1, byteorder='big', signed=False)
             
             else:
                 #尾页
-                end_index = received_bytes[-1] >> 1
+                end_index = last_byte_int >> 1
                 data_list.append(received_bytes[0:end_index+1])
                 break
+        #结束信号
+        self.send(b'\xfe')
         
-        result=bytearray()
+        result=bytes()
         for i in data_list:
-            result.extend(i)
-        
+            result+=i
+
         return result
     
-    def send_long_data(self,buf_length=1,data=bytes()):
-        page_list=[]
-        for i in range(int(len(data)//(buf_length-1)+0.99999)):
-            page_list.append(data[i*buf_length:i*buf_length+buf_length-1])
-        
-        last_page = len(page_list)-1
-        not_done = True
+    def send_long_data(self,buf_len=1,data=bytes()):
+        #字节页数计算
+        buf_len = buf_len-1
+        if len(data)%(buf_len)!=0:
+            largest_page = len(data)//(buf_len)
+        else:
+            largest_page = len(data)/(buf_len)-1
         page = 0
-        while not_done:
-            header_data = self.buf_to_int(self.recv_byte())
-            if not header_data&0b00000001:
-                page = header_data>>1
-
-            buf = page_list[page]
-            if page != last_page:
-                last_byte = 1 + (page<<1)
-                self.send(buf + bytes(last_byte))
-                page += 1
-            else:
-                last_byte = 0 + (len(buf-1)<<1)
-                self.send(buf + bytes(last_byte))
+        while True:
+            print('page:',page)
+            recv_buf = int.from_bytes(self.recv(2), 'big', signed=False)
+            #判断同步指令
+            if not (recv_buf & 0b00000001):
+                page = recv_buf
+                print('sync page:',page)
+            #判断结束
+            if page>largest_page:
                 break
+            send_buf = data[page*buf_len:(page+1)*buf_len]
+            #构建页码
+            if page==largest_page:
+                last_byte = (len(send_buf)-1)<<1
+                while len(send_buf)<buf_len:
+                    send_buf+=b'\x00'
+            else:
+                last_byte = (page<<1)|0b00000001
+            
+            send_buf += last_byte.to_bytes(1, byteorder='big', signed=False)
+            
+            self.send(send_buf)
+            page+=1
+
+class e_paper(server):
+    def __init__(self, address, port):
+        super().__init__(address, port)
+        self.function_list=[self.re_start, self.receive_long_data_test, self.send_long_data_test]
+
+    def receive_long_data_test(self):
+        data = self.receive_long_data()
+        self.function=self.start_signal
+        print(data)
+
+    def send_long_data_test(self):
+        self.send_long_data(buf_len=self.buf_size, data=b'ahbgdu')
+        self.function=self.start_signal
+
 
 if __name__ == '__main__':
-    a=server(socket.gethostname(), 8266)
+    a=e_paper(socket.gethostname(), 8266)
+    a.wait_for_connect()
     while True:
         a.router()
 
