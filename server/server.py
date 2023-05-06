@@ -50,8 +50,11 @@ class server(object):
             raise ValueError('length do not match')
         
     def set_function_and_size(self, function_code=0, buf_size_code=0):
+        if buf_size_code<=7:
+            self.buf_size = 2**buf_size_code
+        else:
+            raise ValueError('buf_size_code must be less than or equal to 7')
         self.function = self.function_list[function_code]
-        self.buf_size = 2**buf_size_code
         self.ack()
 
     def ack(self):
@@ -62,7 +65,7 @@ class server(object):
         self.start_signal()
 
     def start_signal(self):
-        #self.wait_for_connect()
+        self.wait_for_connect()
         received_buf = self.recv_byte()
         received_buf = self.buf_to_int(buf=received_buf)
         
@@ -82,7 +85,7 @@ class server(object):
             print('!!Error:' + str(err))
             self.close()
             self.function = self.start_signal
-        except ConnectionError:
+        except (ConnectionError,OSError):
             self.wait_for_connect()
 
     def receive_long_data(self):
@@ -122,9 +125,9 @@ class server(object):
 
         return result
     
-    def send_long_data(self,buf_len=1,data=bytes()):
+    def send_long_data(self,data=bytes()):
         #字节页数计算
-        buf_len = buf_len-1
+        buf_len = self.buf_size-1
         if len(data)%(buf_len)!=0:
             largest_page = len(data)//(buf_len)
         else:
@@ -157,17 +160,51 @@ class server(object):
 class e_paper(server):
     def __init__(self, address, port):
         super().__init__(address, port)
-        self.function_list=[self.re_start, self.receive_long_data_test, self.send_long_data_test]
-
+        self.function_list=[
+            self.re_start, 
+            self.receive_long_data_test, 
+            self.send_long_data_test,
+            self.receive_send_test,
+            self.data_process,
+            ]
+    #0：单纯的接收数据
     def receive_long_data_test(self):
         data = self.receive_long_data()
         self.function=self.start_signal
         print(data)
-
-    def send_long_data_test(self):
-        self.send_long_data(buf_len=self.buf_size, data=b'ahbgdu')
+        return data
+    #1：单纯的发送数据
+    def send_long_data_test(self,data=b'ajsdhsja'):
+        self.send_long_data(data=data)
         self.function=self.start_signal
+    #2：接收数据再发出同样的数据
+    def receive_send_test(self):
+        from time import sleep
+        data = self.receive_long_data()
 
+        self.send_long_data(data=data)
+        self.function=self.start_signal
+    
+    def data_process(self):
+        from opencv.pixel_process import pixel_process
+        import cv2 as cv
+        import os
+
+        file_name = self.receive_long_data()
+        file_path = './opencv/pic/' + file_name.decode()
+        print('hagdigsahidha',file_path)
+
+        if os.path.exists(file_path):
+            img = cv.imread(file_path, 2)
+            pp = pixel_process(img, height =212 , width = 104)
+            pp.mid = 127
+            pp.make_a_new_pic()
+            bytes_ = pp.encode_bytes()
+        else:
+            bytes_ = b'None'
+
+        self.send_long_data(data = bytes_)
+        self.function=self.start_signal
 
 if __name__ == '__main__':
     a=e_paper(socket.gethostname(), 8266)

@@ -3,6 +3,7 @@ from time import sleep
 
 class client(object):
     def __init__(self):
+        self.receive_tomeout=2
         pass
 
     def connect(self,host,port):
@@ -34,8 +35,6 @@ class client(object):
         self.recv(1,2)
     
     def send_long_data(self, buf_len_code=1, data=b'abcd'):
-        self.start_signal(1,buf_len_code)
-
         #字节页数计算
         buf_len = 2**buf_len_code-1
         if len(data)%(buf_len)!=0:
@@ -59,20 +58,20 @@ class client(object):
                 last_byte = (len(send_buf)-1)<<1
                 while len(send_buf)<buf_len:
                     send_buf+=b'\x00'
-            else:
+            else: 
+                
                 last_byte = (page<<1)|0b00000001
-            
+           
             send_buf += last_byte.to_bytes(1, byteorder='big', signed=False)
             self.send(send_buf)
             page+=1
         
-    def receive_long_data(self, buf_len_code):
+    def receive_long_data(self):
         working, page, data_list, ack = 1, 0, [], b'\xff'
 
-        self.start_signal(2, buf_len_code)
         while working:
             self.send(ack)
-            received_bytes = self.recv(self.buf_size,2)
+            received_bytes = self.recv(self.buf_size,self.receive_tomeout)
             last_byte_int = received_bytes[-1]
             
             if last_byte_int & 0b00000001:
@@ -93,6 +92,7 @@ class client(object):
             else:
                 #尾页
                 end_index = last_byte_int >> 1
+                print(end_index+1)
                 data_list.append(received_bytes[0:end_index+1])
                 break
         #结束信号
@@ -109,16 +109,42 @@ class client(object):
         self.recv(10,2)
 
 class e_paper(client):
-    def test(self):
-        self.send_long_data(4,b'123asdasdsadasd4455')
-        a=self.receive_long_data(2)
+    def test(self,buf_size=2):
+        self.start_signal(1,buf_size)
+        self.send_long_data(buf_size,b'123asdasdsadasd4455')
+
+        self.start_signal(2,buf_size)
+        a=self.receive_long_data()
+
         print(a)
-        self.close()   
+        self.close() 
+
+    def test1(self, pic='./opencv/picd/142.jpg',buf_size=2):
+        self.start_signal(3,buf_size)
+        with open(pic, mode='rb+') as f:
+            self.send_long_data(buf_size, f.read())
+        
+        self.receive_tomeout=6
+        a=self.receive_long_data()
+        with open('2.jpg', mode='ab+') as f:
+            f.write(a)
+        print(a)
+        self.close() 
+    
+    def data_process(self, buf_size=2, file_name = '1.jpg'):
+        self.start_signal(4,buf_size)
+        self.send_long_data(buf_size, file_name.encode())
+        self.receive_tomeout=10
+        data = self.receive_long_data()
+        print(data)
+
 
 if __name__ == '__main__':
     a=e_paper()
-    a.connect(socket.gethostname(),8266)
-    a.test()
+    a.connect(socket.gethostname(), 8266)
+    #a.test()
+    #a.test1(buf_size=7)
+    a.data_process(buf_size=5, file_name = '4.jpg')
 
 
 
