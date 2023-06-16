@@ -1,7 +1,10 @@
-### >> ACK? ACK?
-### NACK!
-### >> 摔！
+### 一个可以用于像素屏和墨水屏的传图程序
 
+支持RGB和BW  
+server 文件夹放于服务器，运行server.py  
+client可以用来接收处理好的字节串 
+图片处理部分：https://github.com/rtyfghvbnlndl/epaper_picture_processing_tool  
+client应用例子（8x8像素屏）：https://github.com/rtyfghvbnlndl/pixel_display_micropython
 ### 日志
 > 4.23
 > 1. 完善了错误处理。

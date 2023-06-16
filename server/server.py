@@ -165,7 +165,8 @@ class e_paper(server):
             self.receive_long_data_test, 
             self.send_long_data_test,
             self.receive_send_test,
-            self.data_process,
+            self.BW_pic,
+            self.RGB_pic,
             ]
     #0：单纯的接收数据
     def receive_long_data_test(self):
@@ -185,7 +186,7 @@ class e_paper(server):
         self.send_long_data(data=data)
         self.function=self.start_signal
     
-    def data_process(self):
+    def BW_pic(self):
         from opencv.pixel_process import pixel_process
         import cv2 as cv
         import os
@@ -198,6 +199,7 @@ class e_paper(server):
             img = cv.imread(file_path, 2)
             pp = pixel_process(img, height =212 , width = 104)
             pp.mid = 127
+            pp.caculate_mid()
             pp.make_a_new_pic()
             bytes_ = pp.encode_bytes()
         else:
@@ -206,8 +208,38 @@ class e_paper(server):
         self.send_long_data(data = bytes_)
         self.function=self.start_signal
 
+    def recv_argument(self):
+        argument = bytes()
+        for i in range(2):
+            argument += self.recv_byte()
+        self.send(b'\xff')
+        return argument
+
+    def RGB_pic(self):
+        from opencv.pixel_process import pixel_process
+        import cv2 as cv
+        import os
+
+        height = int.from_bytes(self.recv_argument(), 'big', signed=False)
+        width = int.from_bytes(self.recv_argument(), 'big', signed=False)
+
+        file_name = self.receive_long_data()
+        file_path = './opencv/pic/' + file_name.decode()
+        print('hagdigsahidha',file_path)
+
+        if os.path.exists(file_path):
+            img = cv.imread(file_path, 1)
+            pp = pixel_process(img, height = height , width = width)
+            pp.make_a_new_pic()
+            bytes_ = pp.encode_bytes_RGB()
+        else:
+            bytes_ = b'None'
+
+        self.send_long_data(data = bytes_)
+        self.function=self.start_signal
+
 if __name__ == '__main__':
-    a=e_paper(socket.gethostname(), 8266)
+    a = e_paper('10.0.4.9', 8266)
     a.wait_for_connect()
     while True:
         a.router()
